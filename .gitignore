@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# Local media & generated downloads
+downloads/
+*.zip
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.webp
+
+# User profile & credentials
+browser-profile/
+.google-flow-creator/
+*.log
+.env
+.env.local
+.data/
+Singleton*
+DevToolsActivePort
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,36 @@
+{
+  "name": "google-flow-cli",
+  "version": "1.0.0",
+  "description": "A high-performance automated CLI tool for generating images and videos via Google Flow.",
+  "type": "module",
+  "bin": {
+    "flow": "./bin/flow.mjs",
+    "flow-image": "./bin/flow.mjs",
+    "flow-video": "./bin/flow.mjs"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/flow.mjs"
+  },
+  "keywords": [
+    "google-flow",
+    "cli",
+    "image-generation",
+    "video-generation",
+    "ai",
+    "automation",
+    "playwright"
+  ],
+  "author": "lukelzlz",
+  "license": "MIT",
+  "dependencies": {
+    "playwright-core": "^1.40.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
