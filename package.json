@@ -6,7 +6,8 @@
   "bin": {
     "flow": "./bin/flow.mjs",
     "flow-image": "./bin/flow.mjs",
-    "flow-video": "./bin/flow.mjs"
+    "flow-video": "./bin/flow.mjs",
+    "flow-status": "./bin/flow.mjs"
   },
   "files": [
     "bin/",

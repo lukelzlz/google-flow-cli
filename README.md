@@ -66,6 +66,17 @@ flow video -p "Cinematic camera fly-through over glowing enchanted neon crystal 
 flow video -p "Space rocket launching to stars, dramatic cinematic lighting" -m "Veo 3.1 - Quality" -q 1080p
 ```
 
+```bash
+# Check environment health & Google Flow login state
+flow status
+
+# Quick local-only status check
+flow status --quick
+
+# Machine-readable JSON output
+flow status --quick --json
+```
+
 ---
 
 ## 🛠️ Command-Line Options
@@ -78,9 +89,10 @@ Usage:
 Subcommands:
   image                        Generate images (alias: flow-image)
   video                        Generate videos (alias: flow-video)
+  status                       Check authentication & system health (alias: flow-status)
 
 Options:
-  -p, --prompt <string>        (Required) Prompt describing the image or video
+  -p, --prompt <string>        (Required for generation) Prompt describing image or video
   -t, --type <image|video>     Generation mode (Default: 'image' or based on subcommand)
   -a, --aspect-ratio <ratio>   Aspect ratio:
                                • Image: '16:9', '4:3', '1:1', '3:4', '9:16' (Default: '16:9')
@@ -95,6 +107,8 @@ Options:
   -o, --output-dir <dir>       Directory to save results (Default: './downloads' in CWD)
   -u, --project-url <url>      Google Flow Project Canvas URL
       --timeout <seconds>      Maximum timeout (Default: 300s for image, 600s for video)
+      --json                   Output status in JSON format (for status subcommand)
+      --quick                  Fast local-only status check without launching browser
   -h, --help                   Display help message
 ```
 

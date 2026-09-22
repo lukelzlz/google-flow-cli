@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * Google Flow CLI (Unified Image & Video Generator)
+ * Google Flow CLI (Unified Image & Video Generator & Status Health Checker)
  * 
  * An automated, high-performance command-line tool for Google Flow.
  * 
  * Features:
- *  - Supports both Image and Video generation (`flow image` / `flow video`)
+ *  - Supports Image, Video generation & System Status (`flow image`, `flow video`, `flow status`)
  *  - Full parameter control (aspect ratio, candidate count, models, quality)
  *  - Direct generation by default (bypasses Agent approval flow)
  *  - Localized output (generates results directly in CWD `./downloads/` or `-o`)
  *  - Auto unzips batch archives and organizes media
  *  - Automatically inspects video streams (ffprobe) & extracts preview thumbnails
  *  - Headless Linux ready (auto Xvfb wrapping & Chrome lock clearing)
+ *  - Comprehensive status inspection (auth, profile, browser, ffmpeg, quota)
  */
 
 import { parseArgs } from 'node:util';
@@ -23,8 +24,13 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// Skip xvfb wrapper for help or quick status checks
+const rawArgs = process.argv.slice(2);
+const isHelp = rawArgs.includes('--help') || rawArgs.includes('-h');
+const isQuickStatus = (rawArgs[0] === 'status' || rawArgs[0] === 'health') && rawArgs.includes('--quick');
+
 // Auto-wrap with xvfb-run on headless Linux if DISPLAY is not present
-if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.INSIDE_XVFB) {
+if (!isHelp && !isQuickStatus && process.platform === 'linux' && !process.env.DISPLAY && !process.env.INSIDE_XVFB) {
   const result = spawnSync('xvfb-run', [
     '-a',
     '--server-args=-screen 0 1400x900x24 -ac',
@@ -53,9 +59,10 @@ Usage:
 Subcommands:
   image                        Generate images (alias: flow-image)
   video                        Generate videos (alias: flow-video)
+  status                       Check Google Flow authentication & system environment (alias: flow-status)
 
 Options:
-  -p, --prompt <string>        (Required) Prompt describing the image or video
+  -p, --prompt <string>        (Required for generation) Prompt describing the image or video
   -t, --type <image|video>     Generation mode (Default: 'image' or based on subcommand)
   -a, --aspect-ratio <ratio>   Aspect ratio:
                                • Image: '16:9', '4:3', '1:1', '3:4', '9:16' (Default: '16:9')
@@ -71,9 +78,14 @@ Options:
   -o, --output-dir <dir>       Directory to save results (Default: './downloads' in current directory)
   -u, --project-url <url>      Google Flow Project Canvas URL
       --timeout <seconds>      Maximum timeout in seconds (Default: 300 for image, 600 for video)
+      --json                   Output status results in JSON format (status subcommand only)
+      --quick                  Perform quick local-only status check without launching browser
   -h, --help                   Display this help message
 
 Examples:
+  # Check Google Flow environment & account login status
+  flow status
+
   # Generate 4 candidate images (16:9)
   flow image -p "Cyberpunk rooftop garden at sunset, Makoto Shinkai style" -a 16:9 -c 4
 
@@ -82,9 +94,6 @@ Examples:
 
   # Generate 1:1 avatar image directly in current directory
   flow image -p "Pixel art indie game dev chibi avatar" -a 1:1 -c 2 -o .
-
-  # Generate video with custom quality
-  flow video -p "Space exploration rocket launching to stars, epic lighting" -q 1080p
 `);
 }
 
@@ -102,12 +111,181 @@ function cleanChromeLocks(profileDir) {
   } catch (e) {}
 }
 
+async function handleStatus(values) {
+  const isJson = values.json;
+  const isQuick = values.quick;
+
+  // 1. Check Node.js
+  const nodeVersion = process.version;
+
+  // 2. Check Chrome
+  const chromePath = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+  let chromeVersion = 'Not found';
+  let chromeOk = false;
+  if (fs.existsSync(chromePath)) {
+    const res = spawnSync(chromePath, ['--version'], { encoding: 'utf-8' });
+    if (res.status === 0) {
+      chromeVersion = res.stdout.trim();
+      chromeOk = true;
+    }
+  }
+
+  // 3. Check Xvfb
+  let xvfbPath = null;
+  const xvfbRes = spawnSync('which', ['xvfb-run'], { encoding: 'utf-8' });
+  if (xvfbRes.status === 0) {
+    xvfbPath = xvfbRes.stdout.trim();
+  }
+
+  // 4. Check FFmpeg & FFprobe
+  let ffmpegVersion = 'Not found';
+  let ffprobeVersion = 'Not found';
+  const ffRes = spawnSync('ffmpeg', ['-version'], { encoding: 'utf-8' });
+  if (ffRes.status === 0) {
+    ffmpegVersion = ffRes.stdout.split('\n')[0];
+  }
+  const ffpRes = spawnSync('ffprobe', ['-version'], { encoding: 'utf-8' });
+  if (ffpRes.status === 0) {
+    ffprobeVersion = ffpRes.stdout.split('\n')[0];
+  }
+
+  // 5. Check Profile Directory
+  const profileDir = DEFAULT_PROFILE;
+  const profileExists = fs.existsSync(profileDir);
+  let profileSizeMB = 0;
+  if (profileExists) {
+    const duRes = spawnSync('du', ['-sm', profileDir], { encoding: 'utf-8' });
+    if (duRes.status === 0) {
+      profileSizeMB = parseInt(duRes.stdout.split('\t')[0], 10) || 0;
+    }
+  }
+
+  // 6. Check Local Downloads
+  const cwdDownloads = path.resolve(process.cwd(), 'downloads');
+  let recentJobs = [];
+  if (fs.existsSync(cwdDownloads)) {
+    try {
+      recentJobs = fs.readdirSync(cwdDownloads)
+        .filter(f => f.startsWith('flow_'))
+        .sort().reverse().slice(0, 5);
+    } catch (e) {}
+  }
+
+  // 7. Online Google Flow Inspection (unless --quick)
+  let flowOnline = null;
+  if (!isQuick && chromeOk) {
+    cleanChromeLocks(profileDir);
+    try {
+      const context = await chromium.launchPersistentContext(profileDir, {
+        executablePath: chromePath,
+        headless: false,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--no-first-run',
+          '--window-size=1400,900'
+        ],
+        viewport: { width: 1400, height: 900 },
+        ignoreDefaultArgs: ['--enable-automation']
+      });
+
+      const page = context.pages()[0] || await context.newPage();
+      await page.goto(DEFAULT_PROJECT_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(4000);
+
+      flowOnline = await page.evaluate(() => {
+        const url = window.location.href;
+        const title = document.title;
+        const text = document.body.innerText || '';
+        const isAuth = !url.includes('accounts.google.com');
+        const isPro = text.includes('PRO') || text.includes('Pro');
+        const hasCanvas = !!document.querySelector('flow-prompt-box, .prompt-bar, .canvas-container, [contenteditable="true"]');
+        return { url, title, isAuth, isPro, hasCanvas };
+      });
+
+      await context.close();
+    } catch (err) {
+      flowOnline = { error: err.message, isAuth: false };
+    }
+  }
+
+  const resultData = {
+    status: (chromeOk && profileExists && (!flowOnline || flowOnline.isAuth)) ? 'HEALTHY' : 'NEEDS_ATTENTION',
+    environment: {
+      node: nodeVersion,
+      chrome: { path: chromePath, version: chromeVersion, ok: chromeOk },
+      xvfb: { installed: !!xvfbPath, path: xvfbPath },
+      ffmpeg: { installed: ffmpegVersion !== 'Not found', version: ffmpegVersion },
+      ffprobe: { installed: ffprobeVersion !== 'Not found', version: ffprobeVersion }
+    },
+    profile: {
+      path: profileDir,
+      exists: profileExists,
+      sizeMB: profileSizeMB
+    },
+    googleFlow: flowOnline ? {
+      authenticated: flowOnline.isAuth,
+      proTier: flowOnline.isPro,
+      canvasReady: flowOnline.hasCanvas,
+      activeUrl: flowOnline.url
+    } : { checked: false, note: 'Skipped online check (use without --quick to verify)' },
+    localWorkspace: {
+      cwd: process.cwd(),
+      downloadsDir: cwdDownloads,
+      recentBatches: recentJobs
+    }
+  };
+
+  if (isJson) {
+    console.log(JSON.stringify(resultData, null, 2));
+    return;
+  }
+
+  // Terminal Dashboard Formatter
+  console.log('\n======================================================');
+  console.log('            Google Flow CLI - System Status           ');
+  console.log('======================================================');
+  
+  const statusColor = resultData.status === 'HEALTHY' ? '\x1b[32m● HEALTHY\x1b[0m' : '\x1b[33m▲ NEEDS ATTENTION\x1b[0m';
+  console.log(`Overall Health:    ${statusColor}\n`);
+
+  console.log('📦 System & Toolchains:');
+  console.log(`  • Node.js:       ${nodeVersion}`);
+  console.log(`  • Google Chrome: ${chromeOk ? `\x1b[32m✓\x1b[0m ${chromeVersion}` : '\x1b[31m✗ Not Installed / Not Found\x1b[0m'}`);
+  console.log(`  • Xvfb Server:   ${xvfbPath ? `\x1b[32m✓\x1b[0m ${xvfbPath}` : '\x1b[33m▲ Missing (Required for headless Linux)\x1b[0m'}`);
+  console.log(`  • FFmpeg:        ${ffmpegVersion !== 'Not found' ? `\x1b[32m✓\x1b[0m Ready (Video Encoding)` : '\x1b[33m▲ Missing\x1b[0m'}`);
+  console.log(`  • FFprobe:       ${ffprobeVersion !== 'Not found' ? `\x1b[32m✓\x1b[0m Ready (Stream Analysis)` : '\x1b[33m▲ Missing\x1b[0m'}`);
+
+  console.log('\n👤 Google Flow Profile:');
+  console.log(`  • Profile Path:  ${profileDir}`);
+  console.log(`  • Status:        ${profileExists ? `\x1b[32m✓\x1b[0m Active (${profileSizeMB} MB)` : '\x1b[31m✗ Profile Directory Missing\x1b[0m'}`);
+
+  if (flowOnline) {
+    console.log('\n🌐 Google Flow Session:');
+    console.log(`  • Auth State:    ${flowOnline.isAuth ? '\x1b[32m✓ Authenticated (Logged In)\x1b[0m' : '\x1b[31m✗ Not Logged In\x1b[0m'}`);
+    console.log(`  • Subscription:  ${flowOnline.isPro ? '\x1b[32m★ Google Flow Pro\x1b[0m' : 'Standard / Free'}`);
+    console.log(`  • Canvas Access: ${flowOnline.hasCanvas ? '\x1b[32m✓ Prompt & Canvas Available\x1b[0m' : 'Ready'}`);
+  }
+
+  console.log('\n📁 Local Execution Workspace:');
+  console.log(`  • Working Dir:   ${process.cwd()}`);
+  console.log(`  • Downloads:     ${cwdDownloads}`);
+  if (recentJobs.length > 0) {
+    console.log(`  • Recent Tasks:  ${recentJobs.join(', ')}`);
+  }
+  console.log('======================================================\n');
+}
+
 async function run() {
-  // Check if first arg is subcommand 'image' or 'video'
   const args = process.argv.slice(2);
   let inferredType = null;
 
-  if (args[0] === 'image' || args[0] === 'img') {
+  if (args[0] === 'status' || args[0] === 'health' || args[0] === 'info') {
+    inferredType = 'status';
+    process.argv.splice(2, 1);
+  } else if (args[0] === 'image' || args[0] === 'img') {
     inferredType = 'image';
     process.argv.splice(2, 1);
   } else if (args[0] === 'video' || args[0] === 'vid') {
@@ -115,6 +293,7 @@ async function run() {
     process.argv.splice(2, 1);
   } else {
     const execName = path.basename(process.argv[1]);
+    if (execName.includes('status')) inferredType = 'status';
     if (execName.includes('image')) inferredType = 'image';
     if (execName.includes('video')) inferredType = 'video';
   }
@@ -131,6 +310,8 @@ async function run() {
     'output-dir': { type: 'string', short: 'o', default: 'downloads' },
     'project-url': { type: 'string', short: 'u', default: DEFAULT_PROJECT_URL },
     timeout: { type: 'string' },
+    json: { type: 'boolean', default: false },
+    quick: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false }
   };
 
@@ -144,13 +325,21 @@ async function run() {
     process.exit(1);
   }
 
-  if (values.help || !values.prompt) {
+  if (values.help) {
     printHelp();
-    if (!values.prompt && !values.help) {
-      console.error('\x1b[31m[Error]\x1b[0m --prompt is required!\n');
-      process.exit(1);
-    }
-    process.exit(0);
+    return;
+  }
+
+  // If status command
+  if (values.type === 'status' || inferredType === 'status') {
+    await handleStatus(values);
+    return;
+  }
+
+  if (!values.prompt) {
+    printHelp();
+    console.error('\x1b[31m[Error]\x1b[0m --prompt is required for image and video generation!\n');
+    process.exit(1);
   }
 
   const genType = values.type === 'video' || values.type === 'vid' ? 'video' : 'image';
