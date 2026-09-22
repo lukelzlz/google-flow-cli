@@ -37,9 +37,16 @@ if (!isHelp && !isQuickStatus && process.platform === 'linux' && !process.env.DI
     process.execPath,
     ...process.argv.slice(1)
   ], {
-    stdio: 'inherit',
+    stdio: ['inherit', 'pipe', 'pipe'],
     env: { ...process.env, INSIDE_XVFB: '1' }
   });
+
+  if (result.stdout && result.stdout.length > 0) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.stderr && result.stderr.length > 0) {
+    process.stderr.write(result.stderr);
+  }
   process.exit(result.status ?? 0);
 }
 
