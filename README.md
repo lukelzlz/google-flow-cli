@@ -64,7 +64,12 @@ flow video -p "Cinematic camera fly-through over glowing enchanted neon crystal 
 
 # Generate video with custom Veo model and quality
 flow video -p "Space rocket launching to stars, dramatic cinematic lighting" -m "Veo 3.1 - Quality" -q 1080p
+
+# Generate smooth transition video between Start Frame and End Frame
+flow video --start-frame ./frame1.png --end-frame ./frame2.png -p "Seamless cinematic camera pan transition from frame 1 to frame 2"
 ```
+
+### 3. System & Environment Health Check (`flow status` / `flow-status`)
 
 ```bash
 # Check environment health & Google Flow login state
@@ -103,7 +108,9 @@ Options:
                                • Video: 'Omni 1.1 Flash' (Default), 'Veo 3.1 - Quality', 'Veo 3.1 - Fast'
   -q, --quality <res>          Video quality/resolution: '720p' (Default), '360p', '1080p'
       --agent                  Enable Agent approval mode (Default: disabled / direct generation)
-  -r, --reference <path>       Path to local reference image to attach
+  -r, --reference <path>       Path to local reference image(s) (comma-separated for multiple)
+      --start-frame <path>     First / Start frame image for video transitions (alias: --first-frame)
+      --end-frame <path>       Last / End frame image for video transitions (alias: --last-frame)
   -o, --output-dir <dir>       Directory to save results (Default: './downloads' in CWD)
   -u, --project-url <url>      Google Flow Project Canvas URL
       --timeout <seconds>      Maximum timeout (Default: 300s for image, 600s for video)
@@ -148,15 +155,16 @@ This CLI tool uses a localized browser profile (`~/.google-flow-creator/browser-
 
 ## 中文说明
 
-Google Flow 统一自动化命令行工具（支持生图与生视频）。
+Google Flow 统一自动化命令行工具（支持生图、生视频与首尾帧平滑转场）。
 
 ### 特性亮点
 
-1. **统一指令**：`flow image`（生图）与 `flow video`（生视频）双模式，并支持快捷命令 `flow-image` 与 `flow-video`。
-2. **全参数支持**：自由配置画面比例（`16:9` / `4:3` / `1:1` / `3:4` / `9:16`）、模型（`Nano Banana` / `Omni Flash` / `Veo 3.1`）、备选张数（`x1`~`x4`）及视频清晰度（`720p` / `1080p`）。
-3. **免审批直出**：默认自动关闭 Agent 审批流，提示词提交后零等待直接出图出片。
-4. **即时落盘与解包**：在哪里执行命令，结果直接保存在当前目录下的 `./downloads/`，自动解压 Zip 并执行 `ffprobe` 质检与封面抽帧。
-5. **Linux 无头开箱即用**：自动检测并包装 Xvfb 虚拟显示服务，自动清理 Chrome 锁文件。
+1. **统一指令**：`flow image`（生图）、`flow video`（生视频）与 `flow status`（状态诊断）。
+2. **首尾帧过渡（Start/End Frame）**：支持传入 `--start-frame` 与 `--end-frame`，由 AI 自动生成两张参考画面之间的平滑运镜补帧视频。
+3. **全参数支持**：自由配置画面比例（`16:9` / `4:3` / `1:1` / `3:4` / `9:16`）、模型（`Nano Banana` / `Omni Flash` / `Veo 3.1`）、备选张数（`x1`~`x4`）及视频清晰度（`720p` / `1080p`）。
+4. **免审批直出**：默认自动关闭 Agent 审批流，提示词提交后零等待直接出图出片。
+5. **即时落盘与解包**：在哪里执行命令，结果直接保存在当前目录下的 `./downloads/`，自动解压 Zip 并执行 `ffprobe` 质检与封面抽帧。
+6. **Linux 无头开箱即用**：自动检测并包装 Xvfb 虚拟显示服务，自动清理 Chrome 锁文件，严格内存保护。
 
 ### 常用命令示例
 
@@ -167,8 +175,14 @@ flow image -p "赛博朋克雨夜霓虹街道，新海诚唯美画风，8k" -a 1
 # 2. 生成电影级 8 秒高清视频（自动提取封面帧）
 flow video -p "Cinematic drone shot soaring over mystical waterfalls in neon cyberpunk city, 4k" -a 16:9
 
-# 3. 绑定角色立绘生成 1:1 头像
+# 3. 提供首尾帧，生成两张图片之间的平滑补帧视频
+flow video --start-frame ./frame1.png --end-frame ./frame2.png -p "Seamless cinematic camera pan transition from frame 1 to frame 2"
+
+# 4. 绑定角色立绘生成 1:1 头像
 flow image -p "二次元少年独立开发者工作台头像" -r ./character.png -a 1:1 -c 2 -o .
+
+# 5. 查看环境诊断与登录健康度
+flow status
 ```
 
 ---

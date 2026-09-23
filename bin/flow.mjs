@@ -51,7 +51,7 @@ if (!isHelp && !isQuickStatus && process.platform === 'linux' && !process.env.DI
 }
 
 const DEFAULT_PROFILE = process.env.FLOW_PROFILE_DIR || path.join(os.homedir(), '.google-flow-creator', 'browser-profile');
-const DEFAULT_PROJECT_URL = process.env.FLOW_PROJECT_URL || 'https://flow.google.com/';
+const DEFAULT_PROJECT_URL = process.env.FLOW_PROJECT_URL || 'https://flow.google.com/project/bd004a86-d75a-44d0-9b09-558376cc2e84';
 
 function printHelp() {
   console.log(`
@@ -81,7 +81,9 @@ Options:
                                         'Veo 3.1 - Quality', 'Veo 3.1 - Fast', 'Veo 3.1 - Lite'
   -q, --quality <res>          Video quality/resolution: '720p' (Default), '360p', '1080p'
       --agent                  Enable Agent approval mode (Default: disabled / direct generation)
-  -r, --reference <path>       Path to local reference image to attach
+  -r, --reference <path>       Path to local reference image(s) to attach (comma-separated for multiple)
+      --start-frame <path>     First / Start frame image for video transitions (alias: --first-frame)
+      --end-frame <path>       Last / End frame image for video transitions (alias: --last-frame)
   -o, --output-dir <dir>       Directory to save results (Default: './downloads' in current directory)
   -u, --project-url <url>      Google Flow Project Canvas URL
       --timeout <seconds>      Maximum timeout in seconds (Default: 300 for image, 600 for video)
@@ -98,6 +100,9 @@ Examples:
 
   # Generate a cinematic video (8s HD)
   flow video -p "Cinematic drone shot soaring over mystical waterfalls in neon cyberpunk city, 4k" -a 16:9
+
+  # Generate video transition between first and last frames
+  flow video --start-frame ./frame1.png --end-frame ./frame2.png -p "Seamless cinematic camera pan transition from frame 1 to frame 2"
 
   # Generate 1:1 avatar image directly in current directory
   flow image -p "Pixel art indie game dev chibi avatar" -a 1:1 -c 2 -o .
@@ -314,6 +319,10 @@ async function run() {
     quality: { type: 'string', short: 'q', default: '720p' },
     agent: { type: 'boolean', default: false },
     reference: { type: 'string', short: 'r' },
+    'start-frame': { type: 'string' },
+    'first-frame': { type: 'string' },
+    'end-frame': { type: 'string' },
+    'last-frame': { type: 'string' },
     'output-dir': { type: 'string', short: 'o', default: 'downloads' },
     'project-url': { type: 'string', short: 'u', default: DEFAULT_PROJECT_URL },
     timeout: { type: 'string' },
@@ -357,7 +366,28 @@ async function run() {
   const modelName = values.model || defaultModel;
   const quality = values.quality;
   const enableAgent = values.agent;
-  const referencePath = values.reference ? path.resolve(process.cwd(), values.reference) : null;
+  
+  // Parse Reference & Start/End Frames
+  const startFrameArg = values['start-frame'] || values['first-frame'];
+  const endFrameArg = values['end-frame'] || values['last-frame'];
+  const startFramePath = startFrameArg ? path.resolve(process.cwd(), startFrameArg) : null;
+  const endFramePath = endFrameArg ? path.resolve(process.cwd(), endFrameArg) : null;
+
+  let referencePaths = [];
+  if (startFramePath) referencePaths.push({ type: 'start', path: startFramePath });
+  if (endFramePath) referencePaths.push({ type: 'end', path: endFramePath });
+
+  if (values.reference) {
+    const rawRefs = values.reference.split(',').map(s => s.trim()).filter(Boolean);
+    for (let idx = 0; idx < rawRefs.length; idx++) {
+      const resolved = path.resolve(process.cwd(), rawRefs[idx]);
+      if (!referencePaths.some(r => r.path === resolved)) {
+        const frameType = (referencePaths.length === 0 && rawRefs.length >= 2) ? 'start' : (referencePaths.length === 1 && rawRefs.length >= 2) ? 'end' : 'reference';
+        referencePaths.push({ type: frameType, path: resolved });
+      }
+    }
+  }
+
   const outputBaseDir = path.resolve(process.cwd(), values['output-dir']);
   const projectUrl = values['project-url'];
   const defaultTimeout = genType === 'image' ? 300 : 600;
@@ -377,7 +407,11 @@ async function run() {
   console.log(`• Candidates:    x${count}`);
   if (genType === 'video') console.log(`• Quality:       ${quality}`);
   console.log(`• Agent Mode:    ${enableAgent ? 'Enabled' : 'Disabled (Direct Generation)'}`);
-  if (referencePath) console.log(`• Reference:     ${referencePath}`);
+  if (startFramePath) console.log(`• Start Frame:   ${startFramePath}`);
+  if (endFramePath) console.log(`• End Frame:     ${endFramePath}`);
+  if (referencePaths.length > 0 && !startFramePath && !endFramePath) {
+    console.log(`• Reference(s):  ${referencePaths.map(r => r.path).join(', ')}`);
+  }
   console.log(`• Output Dir:    ${taskOutputDir}`);
   console.log('======================================================\n');
 
@@ -393,7 +427,8 @@ async function run() {
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--no-first-run',
-      '--window-size=1400,900'
+      '--window-size=1400,900',
+      '--js-flags=--max-old-space-size=256'
     ],
     viewport: { width: 1400, height: 900 },
     ignoreDefaultArgs: ['--enable-automation'],
@@ -410,12 +445,21 @@ async function run() {
     await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(6000);
 
-    // If on landing page, click create or first project
-    if (page.url() === 'https://flow.google.com/' || page.url().endsWith('/home')) {
-      const createBtn = page.locator('button:has-text("使用 Google Flow 建立"), button:has-text("Create"), button:has-text("新增專案")').first();
-      if (await createBtn.isVisible().catch(() => false)) {
+    // If on landing page or not inside project canvas yet, open/create project
+    if (!page.url().includes('/project/')) {
+      const projectLink = page.locator('a[href*="/project/"], .project-card, [data-project-id]').first();
+      const createBtn = page.locator('button:has-text("使用 Google Flow 建立"), button:has-text("Create"), button:has-text("新增專案"), button:has-text("新專案")').first();
+      if (await projectLink.isVisible().catch(() => false)) {
+        console.log('Opening project from dashboard...');
+        await projectLink.click();
+        await page.waitForTimeout(6000);
+      } else if (await createBtn.isVisible().catch(() => false)) {
         console.log('Clicking Create button on landing page...');
         await createBtn.click();
+        await page.waitForTimeout(6000);
+      } else {
+        console.log('Directly redirecting to primary canvas...');
+        await page.goto('https://flow.google.com/project/bd004a86-d75a-44d0-9b09-558376cc2e84', { waitUntil: 'domcontentloaded', timeout: 45000 });
         await page.waitForTimeout(6000);
       }
     }
@@ -518,18 +562,44 @@ async function run() {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
 
-    // Optional: Attach Reference Image
-    if (referencePath && fs.existsSync(referencePath)) {
-      console.log(`📎 Uploading reference asset: ${referencePath}...`);
-      const addMediaBtn = page.locator('button[aria-label*="素材" i], button[aria-label*="add" i], button:has-text("新增素材")').first();
-      if (await addMediaBtn.isVisible().catch(() => false)) {
-        await addMediaBtn.click();
-        await page.waitForTimeout(1000);
-        const fileInput = page.locator('input[type="file"]').first();
-        if (await fileInput.count() > 0) {
-          await fileInput.setInputFiles(referencePath);
-          await page.waitForTimeout(3000);
-          console.log('✓ Reference asset uploaded successfully.');
+    // Optional: Attach Reference Image(s) / Start & End Frames
+    if (referencePaths.length > 0) {
+      console.log(`📎 Uploading ${referencePaths.length} reference frame asset(s)...`);
+      for (let i = 0; i < referencePaths.length; i++) {
+        const item = referencePaths[i];
+        if (!fs.existsSync(item.path)) {
+          console.warn(`⚠️ Reference frame file not found: ${item.path}`);
+          continue;
+        }
+
+        const tagLabel = item.type === 'start' ? 'Start Frame (第一幀)' : item.type === 'end' ? 'End Frame (最後一幀)' : `Reference Asset #${i + 1}`;
+        console.log(`   [${i + 1}/${referencePaths.length}] Uploading ${tagLabel}: ${path.basename(item.path)}...`);
+
+        const addMediaBtn = page.locator('button[aria-label*="素材" i], button[aria-label*="add" i], button:has-text("新增素材"), button[aria-label="新增媒體選單"]').first();
+        if (await addMediaBtn.isVisible().catch(() => false)) {
+          await addMediaBtn.click();
+          await page.waitForTimeout(800);
+
+          const uploadMenuItem = page.locator('[role="menuitem"]:has-text("上傳"), [role="menuitem"]:has-text("Upload"), button:has-text("上傳")').first();
+          if (await uploadMenuItem.isVisible().catch(() => false)) {
+            const [fileChooser] = await Promise.all([
+              page.waitForEvent('filechooser', { timeout: 8000 }).catch(() => null),
+              uploadMenuItem.click()
+            ]);
+            if (fileChooser) {
+              await fileChooser.setFiles(item.path);
+              await page.waitForTimeout(3500);
+              console.log(`   ✓ ${tagLabel} uploaded and attached.`);
+            }
+          } else {
+            // Direct file input fallback
+            const fileInput = page.locator('input[type="file"]').first();
+            if (await fileInput.count() > 0) {
+              await fileInput.setInputFiles(item.path);
+              await page.waitForTimeout(3500);
+              console.log(`   ✓ ${tagLabel} uploaded via input.`);
+            }
+          }
         }
       }
     }
@@ -684,6 +754,9 @@ async function run() {
       candidatesCount: count,
       quality: genType === 'video' ? quality : undefined,
       agentMode: enableAgent,
+      startFrame: startFramePath,
+      endFrame: endFramePath,
+      referenceFrames: referencePaths.map(r => ({ type: r.type, path: r.path })),
       outputDir: taskOutputDir,
       files: downloadedFiles,
       videoStream: videoMeta,
