@@ -23,11 +23,21 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const pkgJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+const VERSION = pkgJson.version || '1.1.0';
 
-// Skip xvfb wrapper for help or quick status checks
+// Skip xvfb wrapper for help, version or quick status checks
 const rawArgs = process.argv.slice(2);
 const isHelp = rawArgs.includes('--help') || rawArgs.includes('-h');
+const isVersion = rawArgs.includes('--version') || rawArgs.includes('-v');
 const isQuickStatus = (rawArgs[0] === 'status' || rawArgs[0] === 'health') && rawArgs.includes('--quick');
+
+if (isVersion) {
+  console.log(`google-flow-cli v${VERSION}`);
+  process.exit(0);
+}
 
 // Auto-wrap with xvfb-run on headless Linux if DISPLAY is not present
 if (!isHelp && !isQuickStatus && process.platform === 'linux' && !process.env.DISPLAY && !process.env.INSIDE_XVFB) {
